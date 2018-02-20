@@ -10,35 +10,39 @@ PanelGraph = class(wx.Panel) {
 		this.Bind(wx.EVT_SIZE) {|event| this.OnSize(event)}
 		this.Bind(wx.EVT_SCROLLWIN) {|event| this.OnScrollWin(event)}
 		this.Bind(wx.EVT_MOUSEWHEEL) {|event| this.OnMouseWheel(event)}
-		this.imgCanvas = image(`rgba, 1000, 600, `white)
-		plotter.Canvas {|cv|
-			cv.graph {|g|
-				g.title = 'Title'
-				g.titleX = 'X-axis'
-				g.titleY = 'Y-axis'
-				g.minX = -10, g.maxX = 10
-				g.minY = -1.5, g.maxY = 1.5
-				g.func(f(x) = math.sin(x))
-			}
-			cv.graph {|g|
-				g.minX = 0, g.maxX = 10
-				g.func(f(x) = math.cos(x * 8) * math.exp(-x * .5) * 10, cntSamples => 300)
-			}
-			cv.graph {}
-			cv.render(this.imgCanvas)
-		}
+		this.imgCanvas = image(`rgba, 600, 600, `white)
+		this.cv = plotter.Canvas()
+		this.g = this.cv.graph()
+		this.g.title = 'Title'
+		this.g.titleX = 'X-axis'
+		this.g.titleY = 'Y-axis'
+		this.g.minX = -10, this.g.maxX = 10
+		this.g.minY = -1.5, this.g.maxY = 1.5
+		//this.g.func(f(x) = math.sin(x))
+		this.cv.render(this.imgCanvas)
 	}
 	OnSize(event:wx.SizeEvent) = {
 		[wdClient, htClient] = this.GetClientSizeWH()
-		this.SetScrollbar(wx.HORIZONTAL, 0, wdClient, this.imgCanvas.width)
-		this.SetScrollbar(wx.VERTICAL, 0, htClient, this.imgCanvas.height)
+		x = this.GetScrollPos(wx.HORIZONTAL)
+		y = this.GetScrollPos(wx.VERTICAL)
+		this.SetScrollbar(wx.HORIZONTAL, x, wdClient, this.imgCanvas.width)
+		this.SetScrollbar(wx.VERTICAL, y, htClient, this.imgCanvas.height)
 		event.Skip()
 	}
 	OnPaint(event:wx.PaintEvent) = {
+		[wdClient, htClient] = this.GetClientSizeWH()
 		dc = wx.PaintDC(this)
-		x = this.GetScrollPos(wx.HORIZONTAL)
-		y = this.GetScrollPos(wx.VERTICAL)
-		this.imgCanvas && dc.DrawBitmap(this.imgCanvas, -x, -y, false)
+		if (this.imgCanvas.width < wdClient) {
+			x = (wdClient - this.imgCanvas.width) / 2
+		} else {
+			x = -this.GetScrollPos(wx.HORIZONTAL)
+		}
+		if (this.imgCanvas.height < htClient) {
+			y = (htClient - this.imgCanvas.height) / 2
+		} else {
+			y = -this.GetScrollPos(wx.VERTICAL)
+		}
+		this.imgCanvas && dc.DrawBitmap(this.imgCanvas, x, y, false)
 		dc = nil
 	}
 	OnScrollWin(event:wx.ScrollWinEvent) = {
@@ -91,16 +95,26 @@ PanelGraph = class(wx.Panel) {
 	}
 }
 
+PanelMain = class(wx.Panel) {
+	__init__(parent:wx.Window, style:number => 0) = {|parent, style => style|
+		outerBox = wx.BoxSizer(wx.VERTICAL)
+		wx.TextCtrl(this, wx.ID_ANY) {|ctrl|
+			outerBox.Add(ctrl, wx.SizerFlags().Expand())
+		}
+		PanelGraph(this) {|panel|
+			outerBox.Add(panel, wx.SizerFlags(1).Expand())
+		}
+		this.SetSizer(outerBox)
+	}
+}
+
 FrameMain = class(wx.Frame) {
 	__init__(title:string, pos:wx.Point => wx.DefaultPosition,
 			size:wx.Size => wx.DefaultSize) = {|nil, wx.ID_ANY, title, pos, size|
 		//this.SetIcon(wx.IconFromXPMData(resource.sample_xpm))
 		menuBar = wx.MenuBar()
 		this.SetMenuBar(menuBar)
-		outerBox = wx.BoxSizer(wx.VERTICAL)
-		PanelGraph(this) {|panel|
-			outerBox.Add(panel, wx.SizerFlags(1).Expand())
-		}
+		PanelMain(this)
 		/*
 		wx.Button(this, wx.ID_ANY, 'push') {|panel|
 			outerBox.Add(panel, wx.SizerFlags(1).Expand())
@@ -109,7 +123,6 @@ FrameMain = class(wx.Frame) {
 			outerBox.Add(ctrl, wx.SizerFlags(1).Expand())
 		}
 		*/
-		this.SetSizer(outerBox)
 	}
 }
 
