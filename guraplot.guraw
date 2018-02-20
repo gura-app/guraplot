@@ -1,39 +1,34 @@
 #!/usr/bin/env gura
 import(wx)
+import(plotter)
 import(resource)
-
-App = class(wx.App) {
-	OnInit() = {
-		frame = FrameMain('GuraPlot')
-		frame.Show()
-		true
-	}
-}
 
 PanelGraph = class(wx.Panel) {
 	__init__(parent:wx.Window) = {|parent|
-		this.bmpScreen = nil
 		this.brushBg = wx.Brush(wx.Colour(128, 128, 128), wx.BRUSHSTYLE_SOLID)
 		this.Bind(wx.EVT_PAINT) {|event| this.OnPaint(event)}
-		this.Bind(wx.EVT_SIZE) {|event| this.OnSize(event)}
-	}
-	BlankImageScreen() = {
-		[wdClient, htClient] = this.GetClientSizeWH()
-		this.bmpScreen = wx.BitmapWH(wdClient, htClient)
-		wx.MemoryDC(this.bmpScreen) {|dc|
-			dc.SetBackground(this.brushBg)
-			dc.Clear()
+		//this.Bind(wx.EVT_SIZE) {|event| this.OnSize(event)}
+		this.imgCanvas = image(`rgba, 800, 800)
+		plotter.Canvas {|cv|
+			cv.graph {|g|
+				g.title = 'Title'
+				g.titleX = 'X-axis'
+				g.titleY = 'Y-axis'
+				g.minX = -10, g.maxX = 10
+				g.minY = -1.5, g.maxY = 1.5
+				g.func(f(x) = math.sin(x))
+			}
+			cv.render(this.imgCanvas)
 		}
 	}
 	OnSize(event:wx.SizeEvent) = {
-		this.BlankImageScreen()
 		event.Skip()
 	}
 	OnPaint(event:wx.PaintEvent) = {
 		dc = wx.PaintDC(this)
 		x = this.GetScrollPos(wx.HORIZONTAL)
 		y = this.GetScrollPos(wx.VERTICAL)
-		this.bmpScreen && dc.DrawBitmap(this.bmpScreen, -x, -y, false)
+		this.imgCanvas && dc.DrawBitmap(this.imgCanvas, -x, -y, false)
 		dc = nil
 	}
 }
@@ -57,6 +52,14 @@ FrameMain = class(wx.Frame) {
 		}
 		*/
 		this.SetSizer(outerBox)
+	}
+}
+
+App = class(wx.App) {
+	OnInit() = {
+		frame = FrameMain('GuraPlot', size => wx.Size(800, 600))
+		frame.Show()
+		true
 	}
 }
 
