@@ -20,6 +20,11 @@ PanelGraph = class(wx.Panel) {
 				g.minY = -1.5, g.maxY = 1.5
 				g.func(f(x) = math.sin(x))
 			}
+			cv.graph {|g|
+				g.minX = 0, g.maxX = 10
+				g.func(f(x) = math.cos(x * 8) * math.exp(-x * .5) * 10, cntSamples => 300)
+			}
+			cv.graph {}
 			cv.render(this.imgCanvas)
 		}
 	}
