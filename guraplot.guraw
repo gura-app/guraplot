@@ -23,10 +23,10 @@ PanelGraph = class(wx.Panel) {
 	}
 	OnSize(event:wx.SizeEvent) = {
 		[wdClient, htClient] = this.GetClientSizeWH()
-		x = this.GetScrollPos(wx.HORIZONTAL)
-		y = this.GetScrollPos(wx.VERTICAL)
-		this.SetScrollbar(wx.HORIZONTAL, x, wdClient, this.imgCanvas.width)
-		this.SetScrollbar(wx.VERTICAL, y, htClient, this.imgCanvas.height)
+		posHorz = this.GetScrollPos(wx.HORIZONTAL)
+		posVert = this.GetScrollPos(wx.VERTICAL)
+		this.SetScrollbar(wx.HORIZONTAL, posHorz, wdClient, this.imgCanvas.width)
+		this.SetScrollbar(wx.VERTICAL, posVert, htClient, this.imgCanvas.height)
 		event.Skip()
 	}
 	OnPaint(event:wx.PaintEvent) = {
