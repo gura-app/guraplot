@@ -66,10 +66,10 @@ PanelGraph = class(wx.Panel) {
 			orientation = wx.VERTICAL
 			pos = this.GetScrollPos(orientation)
 			if (rot < 0) {
-				this.SetScrollPos(orientation, pos + 40)
+				this.SetScrollPos(orientation, pos + 20)
 				this.Refresh()
 			} elsif (rot > 0) {
-				this.SetScrollPos(orientation, pos - 40)
+				this.SetScrollPos(orientation, pos - 20)
 				this.Refresh()
 			}
 		} else {
