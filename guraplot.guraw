@@ -10,7 +10,7 @@ PanelGraph = class(wx.Panel) {
 		this.Bind(wx.EVT_SIZE) {|event| this.OnSize(event)}
 		this.Bind(wx.EVT_SCROLLWIN) {|event| this.OnScrollWin(event)}
 		this.Bind(wx.EVT_MOUSEWHEEL) {|event| this.OnMouseWheel(event)}
-		this.imgCanvas = image(`rgba, 600, 600, `white)
+		this.imgCanvas = image(`rgba, 1000, 600, `white)
 		plotter.Canvas {|cv|
 			cv.graph {|g|
 				g.title = 'Title'
@@ -60,6 +60,29 @@ PanelGraph = class(wx.Panel) {
 		this.Refresh()
 	}
 	OnMouseWheel(event:wx.MouseEvent) = {
+		rot = event.GetWheelRotation()
+		axis = event.GetWheelAxis()
+		if (axis == 0) {
+			orientation = wx.VERTICAL
+			pos = this.GetScrollPos(orientation)
+			if (rot < 0) {
+				this.SetScrollPos(orientation, pos + 40)
+				this.Refresh()
+			} elsif (rot > 0) {
+				this.SetScrollPos(orientation, pos - 40)
+				this.Refresh()
+			}
+		} else {
+			orientation = wx.HORIZONTAL
+			pos = this.GetScrollPos(orientation)
+			if (rot > 0) {
+				this.SetScrollPos(orientation, pos + 20)
+				this.Refresh()
+			} elsif (rot < 0) {
+				this.SetScrollPos(orientation, pos - 20)
+				this.Refresh()
+			}
+		}
 	}
 }
 
