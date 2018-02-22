@@ -23,6 +23,7 @@ PanelGraph = class(wx.Panel) {
 		this.RenderCanvas(false)
 		this.Bind(wx.EVT_PAINT) {|event| this.OnPaint(event)}
 		this.Bind(wx.EVT_SIZE) {|event| this.OnSize(event)}
+		this.Bind(wx.EVT_MOTION) {|event| this.OnMotion(event)}
 		this.Bind(wx.EVT_SCROLLWIN) {|event| this.OnScrollWin(event)}
 		this.Bind(wx.EVT_MOUSEWHEEL) {|event| this.OnMouseWheel(event)}
 	}
@@ -34,6 +35,10 @@ PanelGraph = class(wx.Panel) {
 	}
 	AddGraph() = {
 		this.cv.graph()
+	}
+	HitCheck(x:number, y:number) = {
+		graphs = this.cv.graphs
+		graphs.filter(graphs:*rcAxis.skipnil():*contains(x, y)).next()
 	}
 	RenderCanvas(refreshFlag:boolean => true) = {
 		this.imgCanvas.fill(`white)
@@ -63,6 +68,15 @@ PanelGraph = class(wx.Panel) {
 		}
 		this.imgCanvas && dc.DrawBitmap(this.imgCanvas, x, y, false)
 		dc = nil
+	}
+	OnMotion(event:wx.MouseEvent) = {
+		pt = event.GetPosition()
+		g = this.HitCheck(pt.x, pt.y)
+		if (g && !g.focusFlag) {
+			println('check')
+			g.focusFlag = true
+			this.RenderCanvas()
+		}
 	}
 	OnScrollWin(event:wx.ScrollWinEvent) = {
 		eventType = event.GetEventType()

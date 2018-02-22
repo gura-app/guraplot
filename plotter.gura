@@ -32,7 +32,11 @@ Range = struct(min:number, max:number):map
 //-----------------------------------------------------------------------------
 // Rect
 //-----------------------------------------------------------------------------
-Rect = struct(x:number, y:number, width:number, height:number)
+Rect = struct(x:number, y:number, width:number, height:number) {
+	contains(x:number, y:number) = {
+		this.x <= x && x <= this.x + this.width && this.y <= y && y <= this.y + this.height
+	}
+}
 
 //-----------------------------------------------------------------------------
 // Canvas
@@ -194,6 +198,7 @@ Graph = class {
 		mgnTitleYSub
 		gridX
 		gridY
+		rcAxis
 	}
 	__init__(cv:Canvas, nSpans:number) = {
 		this.fontName = if (sys.platform == `mswin) {
@@ -256,9 +261,9 @@ Graph = class {
 		this.lenGridBit = 6
 		this.gridX = `bit
 		this.gridY = `bit
+		this.rcAxis = nil
 		this.graphSyncRangeX = nil
 		this.graphSyncRangeY = nil
-		this.rcAxis = nil
 		this.dict@drawMarker = %{
 			`pixel			=> this.drawMarker_pixel
 			`square			=> this.drawMarker_square
@@ -829,7 +834,8 @@ Graph = class {
 				// nothing to do
 			} elsif (this.gridX == `bit) {
 				if (this.showTickX) {
-					this.drawVline(cr, this.coordX(this.tickInfosX:*n), this.rcAxis.y + this.rcAxis.height, -this.lenGridBit)
+					this.drawVline(cr, this.coordX(this.tickInfosX:*n),
+								   this.rcAxis.y + this.rcAxis.height, -this.lenGridBit)
 					cr.stroke()
 				}
 			} else {
