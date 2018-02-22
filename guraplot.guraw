@@ -16,14 +16,17 @@ import(resource)
 PanelGraph = class(wx.Panel) {
 	__init__(parent:wx.Window, style:number => 0) = {|parent, style => (style | wx.HSCROLL | wx.VSCROLL)|
 		this.brushBg = wx.Brush(wx.Colour(128, 128, 128), wx.BRUSHSTYLE_SOLID)
+		this.cv = plotter.Canvas()
+		this.g = this.AddGraph()
+		this.PrepareImgCanvas(600, 600)
+		this.RenderCanvas(false)
 		this.Bind(wx.EVT_PAINT) {|event| this.OnPaint(event)}
 		this.Bind(wx.EVT_SIZE) {|event| this.OnSize(event)}
 		this.Bind(wx.EVT_SCROLLWIN) {|event| this.OnScrollWin(event)}
 		this.Bind(wx.EVT_MOUSEWHEEL) {|event| this.OnMouseWheel(event)}
-		this.imgCanvas = image(`rgba, 600, 600, `white)
-		this.cv = plotter.Canvas()
-		this.g = this.AddGraph()
-		this.RenderCanvas(false)
+	}
+	PrepareImgCanvas(width:number, height:number) = {
+		this.imgCanvas = image(`rgba, width, height, `white)
 	}
 	AddFuncToCurGraph(f:function) = {
 		this.g.func(f)

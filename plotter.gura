@@ -1,0 +1,1058 @@
+#!/usr/bin/env gura
+import(cairo)
+import(wx.show)
+
+//-----------------------------------------------------------------------------
+// AttrCycler
+//-----------------------------------------------------------------------------
+AttrCycler = struct(symbol:symbol, values[], iter:iterator => nil)
+
+//-----------------------------------------------------------------------------
+// AttrInfo
+//-----------------------------------------------------------------------------
+AttrInfo = struct(color:color, markerStyle:symbol, markerSize:number, markerColor:color:nil,
+				  lineStyle:symbol, lineWidth:number, lineColor:color:nil,
+				  labelAnchor:symbol, labelColor:color:nil)
+
+//-----------------------------------------------------------------------------
+// TickInfo
+//-----------------------------------------------------------------------------
+TickInfo = struct(n:number, text:string):map
+
+//-----------------------------------------------------------------------------
+// LegendInfo
+//-----------------------------------------------------------------------------
+LegendInfo = struct(text:string):map
+
+//-----------------------------------------------------------------------------
+// Range
+//-----------------------------------------------------------------------------
+Range = struct(min:number, max:number):map
+
+//-----------------------------------------------------------------------------
+// Canvas
+//-----------------------------------------------------------------------------
+Canvas = class {
+	public {
+		width
+		height
+		graphs
+	}
+	__init__(orient?:symbol, nFolds?:number) = {
+		this.orient = orient || `vert
+		!(this.orient in [`horz, `vert]) && raise(error.ValueError, "the argument 'orient' takes `horz or `vert")
+		this.width = 0
+		this.height = 0
+		this.graphs = []
+		this.nFolds = nFolds
+		this.mgnLeft = nil
+		this.mgnRight = nil
+		this.mgnTop = nil
+		this.mgnBottom = nil
+		this.mgnLeftP = 2
+		this.mgnRightP = 2
+		this.mgnTopP = 2
+		this.mgnBottomP = 2
+		this.wdSpace = nil
+		this.htSpace = nil
+		this.wdSpaceP = 2
+		this.htSpaceP = 2
+	}
+	graph(nSpans:number => 1) {block?} = {
+		g = Graph(this, nSpans)
+		this.graphs.add(g)
+		if (block) {block(g)} else {g}
+	} %% {`en, R'''
+	Creates a `plotter.Graph` instance in the target `plotter.Canvas` instance.
+
+	The argument `nSpans` indicates the span size that the created graph occupies. The default is one.
+
+	If `block` is specified, it would be evaluated with a block parameter `|g:plotter.Graph|`,
+	where `g` is the created instance.\n
+	In this case, the block's result would become the function's returned value.
+	'''}
+	blank(nSpans:number => 1) = {
+		g = GraphBlank(this, nSpans)
+		this.graphs.add(g)
+	} %% {`en, R'''
+	Adds a blank to the target `plotter.Canvas` instance instead of a `plotter.Graph`.
+
+	The argument `nSpans` indicates the span size of the blank. The default is one.
+	'''}
+	show(width:number => 600, height:number => 600):void = {
+		img = image(`rgba, width, height, `white)
+		this.render(img)
+		img.show(width + 30 * 2, height + 30 * 2)
+	} %% {`en, R'''
+	Shows a GUI window that renders the content of `plotter.Canvas`.
+
+	The arguments `width` and `height` indicate the canvas size in pixel.
+	'''}
+	render(cr:cairo.context):void = {
+		this.graphs::doSyncRange()
+		[this.width, this.height] = [cr.width, cr.height]
+		this.graphs.isempty() && return
+		nSpansSum = this.graphs:*nSpans.sum()
+		if (this.nFolds) {
+			nGraphsMajor = min(this.nFolds, nSpansSum)
+			nGraphsMinor = int((nSpansSum + this.nFolds - 1) / this.nFolds)
+		} else {
+			nGraphsMajor = nSpansSum
+			nGraphsMinor = 1
+		}
+		mgnLeft = this.mgnLeft || (this.mgnLeftP * this.width / 100)
+		mgnRight = this.mgnRight || (this.mgnRightP * this.width / 100)
+		mgnTop = this.mgnTop || (this.mgnTopP * this.height / 100)
+		mgnBottom = this.mgnBottom || (this.mgnBottomP * this.height / 100)
+		wdSpace = this.wdSpace || (this.wdSpaceP * this.width / 100)
+		htSpace = this.htSpace || (this.htSpaceP * this.height / 100)
+		if (this.orient == `vert) {
+			wdCell = (this.width - mgnLeft - mgnRight - wdSpace * (nGraphsMinor - 1)) / nGraphsMinor
+			htCell = (this.height - mgnTop - mgnBottom - htSpace * (nGraphsMajor - 1)) / nGraphsMajor
+		} else {
+			wdCell = (this.width - mgnLeft - mgnRight - wdSpace * (nGraphsMajor - 1)) / nGraphsMajor
+			htCell = (this.height - mgnTop - mgnBottom - htSpace * (nGraphsMinor - 1)) / nGraphsMinor
+		}
+		iGraphMajor = iGraphMinor = 0
+		this.graphs.each {|g|
+			if (iGraphMajor + g.nSpans > nGraphsMajor) {
+				iGraphMajor = 0, iGraphMinor += 1
+			}
+			if (this.orient == `vert) {
+				x = mgnLeft + iGraphMinor * (wdCell + wdSpace)
+				y = mgnTop + iGraphMajor * (htCell + htSpace)
+				width = wdCell
+				height = htCell + (htCell + htSpace) * (g.nSpans - 1)
+			} else { // this.orient == `horz
+				x = mgnLeft + iGraphMajor * (wdCell + wdSpace)
+				y = mgnTop + iGraphMinor * (htCell + htSpace)
+				width = wdCell + (wdCell + wdSpace) * (g.nSpans - 1)
+				height = htCell
+			}
+			g.render(cr, x, y, width, height)
+			iGraphMajor += g.nSpans
+			if (iGraphMajor >= nGraphsMajor) {
+				iGraphMajor = 0, iGraphMinor += 1
+			}
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Graph
+//-----------------------------------------------------------------------------
+Graph = class {
+	lineStyleDict = %{
+		`solid		=> []
+		`dot		=> [2, 2]
+		`dash		=> [4, 2]
+		`dashdot	=> [8, 2, 2, 2]
+		`dashdotdot	=> [8, 2, 2, 2, 2, 2]
+	}
+	public {
+		nSpans
+		graphPrev
+		showBoundingBox
+		mgnLeft
+		mgnRight
+		mgnTop
+		mgnBottom
+		mgnLeftP
+		mgnRightP
+		mgnTopP
+		mgnBottomP
+		minX, maxX
+		minY, maxY
+		nTicksMaxX
+		nTicksMaxY
+		fontSizeTitle
+		fontSizeTitleX
+		fontSizeTitleY
+		fontSizeTitleYSub
+		fontSizeTickX
+		fontSizeTickY
+		fontSizeLabel
+		htTickX
+		wdTickY
+		title
+		titleX
+		titleY
+		titleYSub
+		formatTickX
+		formatTickY
+		showTickX
+		showTickY
+		mgnTitle
+		mgnTitleX
+		mgnTitleY
+		mgnTitleYSub
+		gridX
+		gridY
+	}
+	__init__(cv:Canvas, nSpans:number) = {
+		this.fontName = if (sys.platform == `mswin) {
+			'Sans'
+		} elsif (sys.platform == `linux) {
+			'Sans'
+		} elsif (sys.platform == `darwin) {
+			'Hiragino Kaku Gothic Pro'
+		} else {
+			'Sans'
+		}
+		this.cv = cv
+		this.nSpans = nSpans
+		this.graphPrev = if (cv.graphs.isempty()) {nil} else {cv.graphs.last()}
+		this.showBoundingBox = false
+		this.mgnLeft = nil
+		this.mgnRight = nil
+		this.mgnTop = nil
+		this.mgnBottom = nil
+		this.mgnLeftP = 0
+		this.mgnRightP = 0
+		this.mgnTopP = 0
+		this.mgnBottomP = 0
+		this.itemInfos = []
+		this.tickInfosX = []
+		this.tickInfosY = []
+		this.legendInfos = []
+		[this.minX, this.maxX] = [-10, 10]
+		[this.minY, this.maxY] = [-10, 10]
+		this.nTicksMaxX = 11
+		this.nTicksMaxY = 11
+		this.attrInfoDefault = AttrInfo(`black, `point, 10, nil, `solid, 1, nil, `nw, nil)
+		this.attrInfoCur = this.attrInfoDefault.clone()
+		this.attrInfosSaved = []
+		this.attrCyclers = []
+		this.fontSizeTitle = 12
+		this.fontSizeTitleX = 12
+		this.fontSizeTitleY = 12
+		this.fontSizeTitleYSub = 12
+		this.fontSizeTickX = 12
+		this.fontSizeTickY = 12
+		this.fontSizeLabel = 12
+		this.htTickX = 12
+		this.wdTickY = 0
+		this.title = ''
+		this.titleX = ''
+		this.titleY = ''
+		this.titleYSub = ''
+		this.formatTickX = '%g'
+		this.formatTickY = '%g'
+		this.showTickX = true
+		this.showTickY = true
+		this.mgnTitle = 4
+		this.mgnTitleX = 4
+		this.mgnTitleY = 4
+		this.mgnTitleYSub = 4
+		this.mgnTickX = 4
+		this.mgnTickY = 4
+		this.lenGridBit = 6
+		this.gridX = `bit
+		this.gridY = `bit
+		this.graphSyncRangeX = nil
+		this.graphSyncRangeY = nil
+		this.dict@drawMarker = %{
+			`pixel			=> this.drawMarker_pixel
+			`square			=> this.drawMarker_square
+			`point			=> this.drawMarker_point
+			`circle			=> this.drawMarker_circle
+			`triangle_down	=> this.drawMarker_triangle_down
+			`triangle_up	=> this.drawMarker_triangle_up
+			`triangle_left	=> this.drawMarker_triangle_left
+			`triangle_right	=> this.drawMarker_triangle_right
+			`tri_down		=> this.drawMarker_tri_down
+			`tri_up			=> this.drawMarker_tri_up
+			`tri_left		=> this.drawMarker_tri_left
+			`tri_right		=> this.drawMarker_tri_right
+			`cross			=> this.drawMarker_cross
+			`plus			=> this.drawMarker_plus
+			`diamond		=> this.drawMarker_diamond
+			`dia			=> this.drawMarker_dia
+		}
+		this.dict@drawLabel = %{
+			`c				=> this.drawLabel_c
+			`n				=> this.drawLabel_n
+			`s				=> this.drawLabel_s
+			`e				=> this.drawLabel_e
+			`w				=> this.drawLabel_w
+			`ne				=> this.drawLabel_ne
+			`nw				=> this.drawLabel_nw
+			`se				=> this.drawLabel_se
+			`sw				=> this.drawLabel_sw
+		}
+	}
+	show(width:number => 600, height:number => 600):void = {
+		this.cv.show(width, height)
+	} %% {`en, R'''
+	'''}
+	saveAttr() {block?} = {
+		if (block) {
+			attrInfoSaved = this.attrInfoCur.clone()
+			block()
+			this.attrInfoCur = attrInfoSaved
+		} else {
+			this.attrInfosSaved.add(this.attrInfoCur.clone())
+		}
+	} %% {`en, R'''
+	'''}
+	restoreAttr() = {
+		if (!this.attrInfosSaved.isempty()) {
+			this.attrInfoCur = this.attrInfosSaved.last()
+			this.attrInfosSaved.erase(-1)
+		}
+	} %% {`en, R'''
+	'''}
+	attr(color?:color, markerStyle?:symbol, markerSize?:number, markerColor?:color,
+		 lineStyle?:symbol, lineWidth?:number, lineColor?:color,
+		 labelAnchor?:symbol, labelColor?:color) {block?} = {
+		block && this.saveAttr()
+		color?			&& (this.attrInfoCur.color = color)
+		markerStyle?	&& (this.attrInfoCur.markerStyle = markerStyle)
+		markerSize?		&& (this.attrInfoCur.markerSize = markerSize)
+		markerColor?	&& (this.attrInfoCur.markerColor = markerColor)
+		lineStyle?		&& (this.attrInfoCur.lineStyle = lineStyle)
+		lineWidth?		&& (this.attrInfoCur.lineWidth = lineWidth)
+		lineColor?		&& (this.attrInfoCur.lineColor = lineColor)
+		labelAnchor?	&& (this.attrInfoCur.labelAnchor = labelAnchor)
+		labelColor?		&& (this.attrInfoCur.labelColor = labelColor)
+		if (block) {
+			block()
+			this.restoreAttr()
+		}
+		this
+	} %% {`en, R'''
+	'''}
+	attrCycle(color[]?:color, markerStyle[]?:symbol, markerSize[]?:number, markerColor[]?:color,
+			  lineStyle[]?:symbol, lineWidth[]?:number, lineColor[]?:color,
+			  labelAnchor[]?:symbol, labelColor[]?:color) = {
+		color?			&& this.addAttrCycler(`color, color)
+		markerStyle?	&& this.addAttrCycler(`markerStyle, markerStyle)
+		markerSize?		&& this.addAttrCycler(`markerSize, markerSize)
+		markerColor?	&& this.addAttrCycler(`markerColor, markerColor)
+		lineStyle?		&& this.addAttrCycler(`lineStyle, lineStyle)
+		lineWidth?		&& this.addAttrCycler(`lineWidth, lineWidth)
+		lineColor?		&& this.addAttrCycler(`lineColor, lineColor)
+		labelAnchor?	&& this.addAttrCycler(`labelAnchor, labelAnchor)
+		labelColor?		&& this.addAttrCycler(`labelColor, labelColor)
+		this
+	} %% {`en, R'''
+	'''}
+	getAttrInfo(cycleFlag:boolean => true) = {
+		attrInfo = this.attrInfoCur.clone()
+		if (cycleFlag) {
+			this.attrCyclers.each {|attrCycler|
+				attrCycler.iter = attrCycler.iter || attrCycler.values.cycle()
+				attrInfo.setprop!(attrCycler.symbol, attrCycler.iter.next())
+			}
+		}
+		attrInfo
+	}
+	addAttrCycler(symbol:symbol, values[]) = {
+		this.attrCyclers.add(AttrCycler(symbol, values))
+	}
+	marker(xs[]:number, ys[]:number) = {
+		attrInfo = this.getAttrInfo()
+		attrInfo.lineStyle = `none
+		this.itemInfos.add(PlotInfo(xs, ys, attrInfo))
+	} %% {`en, R'''
+	'''}
+	linedMarker(xs[]:number, ys[]:number) = {
+		attrInfo = this.getAttrInfo()
+		this.itemInfos.add(PlotInfo(xs, ys, attrInfo))
+	} %% {`en, R'''
+	'''}
+	line(xs[]:number, ys[]?:number) = {
+		attrInfo = this.getAttrInfo()
+		attrInfo.markerStyle = `none
+		if (ys) {
+			this.itemInfos.add(PlotInfo(xs, ys, attrInfo))
+		} else {
+			this.itemInfos.add(PlotInfo(range(xs.len()):list, xs, attrInfo))
+		}
+	} %% {`en, R'''
+	'''}
+	func(func:function, min?:number, max?:number, cntSamples:number => 100):map:void = {
+		idxMatched = this.itemInfos:*matchedSymbol(func.symbol).find():index
+		idxMatched && this.itemInfos.erase(idxMatched)
+		attrInfo = this.getAttrInfo()
+		attrInfo.markerStyle = `none
+		this.itemInfos.add(FuncInfo(func, min, max, cntSamples, attrInfo))
+	} %% {`en, R'''
+	'''}
+	label(x:number, y:number, text:string, xOffset:number => 0, yOffset:number => 0):map:void = {
+		attrInfo = this.getAttrInfo(false)
+		attrInfo.markerStyle = `none
+		attrInfo.lineStyle = `none
+		this.itemInfos.add(LabelInfo(x, y, text, xOffset, yOffset, attrInfo))
+	} %% {`en, R'''
+	'''}
+	hline(y:number, min?:number, max?:number):map:void = {
+		attrInfo = this.getAttrInfo()
+		attrInfo.markerStyle = `none
+		this.itemInfos.add(HLineInfo(y, min, max, attrInfo))
+	} %% {`en, R'''
+	'''}
+	vline(x:number, min?:number, max?:number):map:void = {
+		attrInfo = this.getAttrInfo()
+		attrInfo.markerStyle = `none
+		this.itemInfos.add(VLineInfo(x, min, max, attrInfo))
+	} %% {`en, R'''
+	'''}
+	render(cr:cairo.context, x:number, y:number, width:number, height:number):void = {
+		this.updateTickInfos()
+		cr.select_font_face(this.fontName, cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+		cr.save {
+			cr.set_font_size(this.fontSizeTickY)
+			this.wdTickY = cr.text_extents(this.tickInfosY:*text):*width.max()
+		}
+		mgnLeft = this.mgnLeft || (this.mgnLeftP * this.cv.width / 100)
+		mgnRight = this.mgnRight || (this.mgnRightP * this.cv.width / 100)
+		mgnTop = this.mgnTop || (this.mgnTopP * this.cv.height / 100)
+		mgnBottom = this.mgnBottom || (this.mgnBottomP * this.cv.height / 100)
+		spaceTitle = cond(this.title.isempty(), 0, this.fontSizeTitle * 1.2 + this.mgnTitle)
+		spaceTitleX = cond(this.titleX.isempty(), 0, this.fontSizeTitleX * 1.2 + this.mgnTitleX)
+		spaceTitleY = cond(this.titleY.isempty(), 0, this.fontSizeTitleY * 1.2 + this.mgnTitleY)
+		spaceTitleYSub = cond(this.titleYSub.isempty(), 0, this.fontSizeTitleYSub * 1.2 + this.mgnTitleYSub)
+		[wdTickY, mgnTickY] = if (this.showTickY) {[this.wdTickY, this.mgnTickY]} else {[0, 0]}
+		[htTickX, mgnTickX] = if (this.showTickX) {[this.htTickX, this.mgnTickX]} else {[0, 0]}
+		[this.xAxis, this.yAxis] = [
+			x + mgnLeft + spaceTitleY + wdTickY + mgnTickY
+			y + mgnTop + spaceTitle
+		]
+		[this.wdAxis, this.htAxis] = [
+			width - (mgnLeft + spaceTitleY + spaceTitleYSub + wdTickY + mgnTickY + mgnRight)
+			height - (mgnTop + spaceTitleX + spaceTitle + mgnTickX + htTickX + mgnBottom)
+		]
+		if (!this.title.isempty()) {
+			cr.set_font_size(this.fontSizeTitle)
+			this.drawLabel_n(cr, x + mgnLeft + (width - mgnLeft - mgnRight) / 2, y + mgnTop, this.title)
+		}
+		if (!this.titleX.isempty()) {
+			cr.set_font_size(this.fontSizeTitleX)
+			this.drawLabel_n(cr, this.xAxis + this.wdAxis / 2,
+							this.yAxis + this.htAxis + mgnTickX + htTickX + this.mgnTitleX, this.titleX)
+		}
+		if (!this.titleY.isempty()) {
+			cr.set_font_size(this.fontSizeTitleY)
+			this.drawRotText_w(cr, x + mgnLeft, this.yAxis + this.htAxis / 2, this.titleY)
+		}
+		if (!this.titleYSub.isempty()) {
+			cr.set_font_size(this.fontSizeTitleYSub)
+			this.drawRotText_w(cr, this.xAxis + this.wdAxis + this.mgnTitleYSub,
+								this.yAxis + this.htAxis / 2, this.titleYSub)
+		}
+		cr.save {
+			this.drawAxis(cr)
+			this.clipAxis(cr)
+			this.itemInfos::draw(this, cr)
+			this.drawLegends(cr)
+		}
+		if (this.showBoundingBox) {
+			cr.save {
+				cr.set_line_width(1)
+				cr.set_dash([4, 2], 0)
+				cr.rectangle(x, y, width, height)
+				cr.stroke()
+			}
+		}
+	}
+	adjustRange(mgnPropX?:number, mgnPropY?:number) = {
+		mgnPropX = mgnPropX || 10
+		mgnPropY = mgnPropY || mgnPropX
+		rangesX = this.itemInfos:*getRangeX().skipnil()
+		rangesY = this.itemInfos:*getRangeY().skipnil()
+		minX = rangesX:*min.min(), maxX = rangesX:*max.max()
+		minY = rangesY:*min.min(), maxY = rangesY:*max.max()
+		if ((d = maxX - minX) > 0) {
+			mgn = d * mgnPropX / 100
+			this.minX = minX - mgn, this.maxX = maxX + mgn
+		}
+		if ((d = maxY - minY) > 0) {
+			mgn = d * mgnPropY / 100
+			this.minY = minY- mgn, this.maxY = maxY + mgn
+		}
+	} %% {`en, R'''
+	'''}
+	doSyncRange():void = {
+		if (this.graphSyncRangeX) {
+			this.minX = this.graphSyncRangeX.minX
+			this.maxX = this.graphSyncRangeX.maxX
+		}
+		if (this.graphSyncRangeY) {
+			this.minY = this.graphSyncRangeY.minY
+			this.maxY = this.graphSyncRangeY.maxY
+		}
+	}
+	syncRangeX(g?:Graph) = {
+		this.graphSyncRangeX = g || this.graphPrev
+	} %% {`en, R'''
+	'''}
+	syncRangeY(g?:Graph) = {
+		this.graphSyncRangeY = g || this.graphPrev
+	} %% {`en, R'''
+	'''}
+	coordX(x:number):map = {
+		this.xAxis + (x - this.minX) * this.wdAxis / (this.maxX - this.minX)
+	}
+	coordY(y:number):map = {
+		this.yAxis + this.htAxis - (y - this.minY) * this.htAxis / (this.maxY - this.minY)
+	}
+	calcStep(tMin:number, tMax:number, nTicksMax:number) = {
+		tRange = tMax - tMin
+		nScales = [1000, 500, 250, 200, 150, 100, 50, 25, 20, 15, 10, 5, 2.5, 2, 1]
+		tStepBase = 10 ** (int(math.log10(tRange)) - 2)
+		tSteps = tStepBase * nScales
+		(tSteps.filter(tRange / tSteps < nTicksMax):list).last()
+	}
+	drawHline(cr:cairo.context, x:number, y:number, width:number):map:void = {
+		cr.move_to(x, y).rel_line_to(width, 0)
+	}
+	drawVline(cr:cairo.context, x:number, y:number, height:number):map:void = {
+		cr.move_to(x, y).rel_line_to(0, height)
+	}
+	drawMarker(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		this.dict@drawMarker[attrInfo.markerStyle](cr, x, y, attrInfo)
+	}
+	drawMarker_pixel(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			cr.rectangle(x - attrInfo.markerSize / 2, y - attrInfo.markerSize / 2,
+						 attrInfo.markerSize, attrInfo.markerSize)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.fill()
+		}
+	}
+	drawMarker_square(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			cr.rectangle(x - attrInfo.markerSize / 2, y - attrInfo.markerSize / 2,
+						 attrInfo.markerSize, attrInfo.markerSize)
+			cr.set_source_color(`white)
+			cr.fill_preserve()
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	drawMarker_point(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			cr.arc(x, y, attrInfo.markerSize / 2, 0, math.pi * 2)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.fill()
+		}
+	}
+	drawMarker_circle(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			cr.arc(x, y, attrInfo.markerSize / 2, 0, math.pi * 2)
+			cr.set_source_color(`white)
+			cr.fill_preserve()
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	makePath_triangle_down(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		markerSizeHalf = attrInfo.markerSize / 2
+		markerSizeTan = attrInfo.markerSize * 0.577	// 1 / sqrt(3)
+		cr.move_to(x, y + markerSizeHalf)
+		cr.line_to(x - markerSizeTan, y - markerSizeHalf)
+		cr.line_to(x + markerSizeTan, y - markerSizeHalf)
+		cr.line_to(x, y + markerSizeHalf)
+	}
+	makePath_triangle_up(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		markerSizeHalf = attrInfo.markerSize / 2
+		markerSizeTan = attrInfo.markerSize * 0.577	// 1 / sqrt(3)
+		cr.move_to(x, y - markerSizeHalf)
+		cr.line_to(x - markerSizeTan, y + markerSizeHalf)
+		cr.line_to(x + markerSizeTan, y + markerSizeHalf)
+		cr.line_to(x, y - markerSizeHalf)
+	}
+	makePath_triangle_left(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		markerSizeHalf = attrInfo.markerSize / 2
+		markerSizeTan = attrInfo.markerSize * 0.577	// 1 / sqrt(3)
+		cr.move_to(x - markerSizeHalf, y)
+		cr.line_to(x + markerSizeHalf, y - markerSizeTan)
+		cr.line_to(x + markerSizeHalf, y + markerSizeTan)
+		cr.line_to(x - markerSizeHalf, y)
+	}
+	makePath_triangle_right(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		markerSizeHalf = attrInfo.markerSize / 2
+		markerSizeTan = attrInfo.markerSize * 0.577	// 1 / sqrt(3)
+		cr.move_to(x + markerSizeHalf, y)
+		cr.line_to(x - markerSizeHalf, y - markerSizeTan)
+		cr.line_to(x - markerSizeHalf, y + markerSizeTan)
+		cr.line_to(x + markerSizeHalf, y)
+	}
+	drawMarker_triangle_down(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_triangle_down(cr, x, y, attrInfo)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.fill()
+		}
+	}
+	drawMarker_triangle_up(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_triangle_up(cr, x, y, attrInfo)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.fill()
+		}
+	}
+	drawMarker_triangle_left(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_triangle_left(cr, x, y, attrInfo)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.fill()
+		}
+	}
+	drawMarker_triangle_right(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_triangle_right(cr, x, y, attrInfo)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.fill()
+		}
+	}
+	drawMarker_tri_down(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_triangle_down(cr, x, y, attrInfo)
+			cr.set_source_color(`white)
+			cr.fill_preserve()
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	drawMarker_tri_up(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_triangle_up(cr, x, y, attrInfo)
+			cr.set_source_color(`white)
+			cr.fill_preserve()
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	drawMarker_tri_left(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_triangle_left(cr, x, y, attrInfo)
+			cr.set_source_color(`white)
+			cr.fill_preserve()
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	drawMarker_tri_right(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_triangle_right(cr, x, y, attrInfo)
+			cr.set_source_color(`white)
+			cr.fill_preserve()
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	drawMarker_cross(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		markerSizeHalf = attrInfo.markerSize / 2
+		cr.save {
+			cr.move_to(x - markerSizeHalf, y - markerSizeHalf)
+			cr.line_to(x + markerSizeHalf, y + markerSizeHalf)
+			cr.move_to(x + markerSizeHalf, y - markerSizeHalf)
+			cr.line_to(x - markerSizeHalf, y + markerSizeHalf)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	drawMarker_plus(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		markerSizeSqrt = attrInfo.markerSize * 0.705
+		cr.save {
+			cr.move_to(x - markerSizeSqrt, y)
+			cr.line_to(x + markerSizeSqrt, y)
+			cr.move_to(x, y - markerSizeSqrt)
+			cr.line_to(x, y + markerSizeSqrt)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	makePath_diamond(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		markerSizeSqrt = attrInfo.markerSize * 0.707	// 1 / sqrt(2)
+		cr.move_to(x + markerSizeSqrt, y)
+		cr.line_to(x, y - markerSizeSqrt)
+		cr.line_to(x - markerSizeSqrt, y)
+		cr.line_to(x, y + markerSizeSqrt)
+		cr.line_to(x + markerSizeSqrt, y)
+	}
+	drawMarker_diamond(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_diamond(cr, x, y, attrInfo)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.fill()
+		}
+	}
+	drawMarker_dia(cr:cairo.context, x:number, y:number, attrInfo:AttrInfo):map:void = {
+		cr.save {
+			makePath_diamond(cr, x, y, attrInfo)
+			cr.set_source_color(attrInfo.markerColor || attrInfo.color)
+			cr.set_line_width(1)
+			cr.stroke()
+		}
+	}
+	drawLabel(cr:cairo.context, x:number, y:number, text:string, attrInfo:AttrInfo):map:void = {
+		cr.set_source_color(attrInfo.labelColor || attrInfo.color)
+		this.dict@drawLabel[attrInfo.labelAnchor](cr, x, y, text)
+		cr.stroke() // just to remove current position
+	}
+	drawLabel_c(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extFont = cr.font_extents()
+		extText = cr.text_extents(text)
+		x -= extText.x_advance / 2
+		y += extFont.ascent / 2
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawLabel_n(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extFont = cr.font_extents()
+		extText = cr.text_extents(text)
+		x -= extText.x_advance / 2
+		y += extFont.ascent
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawLabel_s(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extText = cr.text_extents(text)
+		x -= extText.x_advance / 2
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawLabel_e(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extFont = cr.font_extents()
+		extText = cr.text_extents(text)
+		x -= extText.x_advance
+		y += extFont.ascent / 2
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawLabel_w(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extFont = cr.font_extents()
+		extText = cr.text_extents(text)
+		y += extFont.ascent / 2
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawLabel_ne(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extFont = cr.font_extents()
+		extText = cr.text_extents(text)
+		x -= extText.x_advance
+		y += extFont.ascent
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawLabel_nw(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extFont = cr.font_extents()
+		extText = cr.text_extents(text)
+		y += extFont.ascent
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawLabel_se(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extText = cr.text_extents(text)
+		x -= extText.x_advance
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawLabel_sw(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extText = cr.text_extents(text)
+		cr.move_to(x, y)
+		cr.show_text(text)
+	}
+	drawRotText_w(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extFont = cr.font_extents()
+		extText = cr.text_extents(text)
+		cr.save {
+			cr.translate(x + extFont.ascent, y + extText.x_advance / 2)
+			cr.rotate(-math.pi / 2)
+			cr.move_to(0, 0)
+			cr.show_text(text)
+		}
+	}
+	drawRotText_e(cr:cairo.context, x:number, y:number, text:string):map:void = {
+		extText = cr.text_extents(text)
+		cr.save {
+			cr.translate(x, y + extText.x_advance / 2)
+			cr.rotate(-math.pi / 2)
+			cr.move_to(0, 0)
+			cr.show_text(text)
+		}
+	}
+	clipAxis(cr:cairo.context) = {
+		cr.rectangle(this.xAxis, this.yAxis, this.wdAxis, this.htAxis)
+		cr.clip()
+	}
+	updateTickInfos() = {
+		tStep = this.calcStep(this.minX, this.maxX, this.nTicksMaxX)
+		xCoords = (int(this.minX / tStep) + (0 .. int((this.maxX - this.minX) / tStep))) * tStep
+		this.tickInfosX = TickInfo(xCoords, format(this.formatTickX, xCoords)):list
+		tStep = this.calcStep(this.minY, this.maxY, this.nTicksMaxY)
+		yCoords = (int(this.minY / tStep) + (0 .. int((this.maxY - this.minY) / tStep))) * tStep
+		this.tickInfosY = TickInfo(yCoords, format(this.formatTickY, yCoords)):list
+	}
+	drawAxis(cr:cairo.context) = {
+		cr.set_line_width(1)
+		cr.save {
+			cr.set_antialias(cairo.ANTIALIAS_NONE)
+			cr.rectangle(this.xAxis, this.yAxis, this.wdAxis, this.htAxis)
+			cr.set_dash([], 0)
+			cr.stroke()
+		}
+		if (this.gridX != `none && this.minX < 0 && 0 < this.maxX) {
+			this.drawVline(cr, this.coordX(0), this.yAxis, this.htAxis)
+			cr.set_dash([], 0)
+			cr.stroke()
+		}
+		if (this.gridY != `none && this.minY < 0 && 0 < this.maxY) {
+			this.drawHline(cr, this.xAxis, this.coordY(0), this.wdAxis)
+			cr.set_dash([], 0)
+			cr.stroke()
+		}
+		cr.save {
+			this.clipAxis(cr)
+			if (this.gridX == `none) {
+				// nothing to do
+			} elsif (this.gridX == `bit) {
+				if (this.showTickX) {
+					this.drawVline(cr, this.coordX(this.tickInfosX:*n), this.yAxis + this.htAxis, -this.lenGridBit)
+					cr.stroke()
+				}
+			} else {
+				this.applyLineStyle(cr, this.gridX)
+				this.drawVline(cr, this.coordX(this.tickInfosX:*n), this.yAxis, this.htAxis)
+				cr.stroke()
+			}
+		}
+		cr.save {
+			this.clipAxis(cr)
+			if (this.gridY == `none) {
+				// nothing to do
+			} elsif (this.gridY == `bit) {
+				if (this.showTickY) {
+					this.drawHline(cr, this.xAxis, this.coordY(this.tickInfosY:*n), this.lenGridBit)
+					cr.stroke()
+				}
+			} else {
+				this.applyLineStyle(cr, this.gridY)
+				this.drawHline(cr, this.xAxis, this.coordY(this.tickInfosY:*n), this.wdAxis)
+				cr.stroke()
+			}
+		}
+		if (this.showTickX) {
+			cr.save {
+				cr.set_font_size(this.fontSizeTickX)
+				this.drawLabel_s(cr, this.coordX(this.tickInfosX:*n),
+								 this.yAxis + this.htAxis + this.mgnTickX + this.htTickX, this.tickInfosX:*text)
+			}
+		}
+		if (this.showTickY) {
+			cr.save {
+				cr.set_font_size(this.fontSizeTickY)
+				this.drawLabel_e(cr, this.xAxis - this.mgnTickY,
+								 this.coordY(this.tickInfosY:*n), this.tickInfosY:*text)
+			}
+		}
+	}
+	applyLineWidth(cr:cairo.context, lineWidth:number) = {
+		cr.set_line_width(lineWidth)
+	}
+	applyLineStyle(cr:cairo.context, lineStyle:symbol) = {
+		cr.set_dash(this.lineStyleDict[lineStyle], 0)
+	}
+	drawLegends(cr:cairo.context) = {
+		this.legendInfos.isempty() && return
+		wdLegend = 100, htLegend = 100
+		mgnLegendX = 10, mgnLegendY = 10
+		xLegend = this.xAxis + this.wdAxis - (mgnLegendX + wdLegend)
+		yLegend = this.yAxis + mgnLegendY
+		cr.save {
+			cr.rectangle(xLegend, yLegend, wdLegend, htLegend)
+			cr.set_source_color(`white)
+			cr.fill_preserve()
+			cr.set_source_color(`black)
+			cr.stroke()
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// GraphBlank
+//-----------------------------------------------------------------------------
+GraphBlank = class {
+	public {
+		nSpans
+	}
+	__init__(cv:Canvas, nSpans:number) = {
+		this.nSpans = nSpans
+	}
+	render(cr:cairo.context, x:number, y:number, width:number, height:number):void = {
+		// nothing to do
+	}
+	doSyncRange():void = {
+		// nothing to do
+	}
+}
+
+//-----------------------------------------------------------------------------
+// PlotInfo
+//-----------------------------------------------------------------------------
+PlotInfo = struct(xs[]:number, ys[]:number, attrInfo:AttrInfo) {
+	draw(g:Graph, cr:cairo.context):void = cr.save {
+		attrInfo = this.attrInfo
+		if (attrInfo.lineStyle != `none) {
+			cr.save {
+				cr.line_to(g.coordX(this.xs), g.coordY(this.ys))
+				cr.set_source_color(attrInfo.lineColor || attrInfo.color)
+				g.applyLineWidth(cr, attrInfo.lineWidth)
+				g.applyLineStyle(cr, attrInfo.lineStyle)
+				cr.stroke()
+			}
+		}
+		if (attrInfo.markerStyle != `none) {
+			cr.save {
+				g.drawMarker(cr, g.coordX(this.xs), g.coordY(this.ys), attrInfo)
+			}
+		}
+	}
+	getRangeX() = Range(this.xs.min(), this.xs.max())
+	getRangeY() = Range(this.ys.min(), this.ys.max())
+	matchedSymbol(symbol:symbol) = false
+}
+
+//-----------------------------------------------------------------------------
+// FuncInfo
+//-----------------------------------------------------------------------------
+FuncInfo = struct(func:function, min:number:nil, max:number:nil, cntSamples:number, attrInfo:AttrInfo):map {
+	draw(g:Graph, cr:cairo.context):void = cr.save {
+		cr.set_antialias(cairo.ANTIALIAS_DEFAULT)
+		attrInfo = this.attrInfo
+		syms = [this.func.decls:*symbol]
+		if (syms.len() != 1) {
+			raise(error.ValueError, 'wrong number of arguments')
+		}
+		(attrInfo.lineStyle == `none) && continue
+		sym = syms.first()
+		try {
+			if (sym == `y) {
+				ys = interval(this.min || g.minY, this.max || g.maxY, this.cntSamples)
+				cr.line_to(g.coordX(this.func(ys)), g.coordY(ys))
+			} else {
+				xs = interval(this.min || g.minX, this.max || g.maxX, this.cntSamples)
+				cr.line_to(g.coordX(xs), g.coordY(this.func(xs)))
+			}
+		} catch {
+			return
+		}
+		cr.set_source_color(attrInfo.lineColor || attrInfo.color)
+		g.applyLineWidth(cr, attrInfo.lineWidth)
+		g.applyLineStyle(cr, attrInfo.lineStyle)
+		cr.stroke()
+	}
+	getRangeX() = nil
+	getRangeY() = nil
+	matchedSymbol(symbol:symbol) = {this.func.symbol == symbol}
+}
+
+//-----------------------------------------------------------------------------
+// LabelInfo
+//-----------------------------------------------------------------------------
+LabelInfo = struct(x:number, y:number, text:string, xOffset:number, yOffset:number, attrInfo:AttrInfo) {
+	draw(g:Graph, cr:cairo.context) = cr.save {
+		attrInfo = this.attrInfo
+		cr.set_font_size(g.fontSizeLabel)
+		g.drawLabel(cr, g.coordX(this.x) + this.xOffset,
+				   g.coordY(this.y) + this.yOffset, this.text, attrInfo)
+	}
+	getRangeX() = Range(this.x, this.x)
+	getRangeY() = Range(this.y, this.y)
+	matchedSymbol(symbol:symbol) = false
+}
+
+//-----------------------------------------------------------------------------
+// HLineInfo
+//-----------------------------------------------------------------------------
+HLineInfo = struct(y:number, min:number:nil, max:number:nil, attrInfo:AttrInfo):map {
+	draw(g:Graph, cr:cairo.context) = cr.save {
+		cr.set_antialias(cairo.ANTIALIAS_DEFAULT)
+		attrInfo = this.attrInfo
+		(attrInfo.lineStyle == `none) && continue
+		y = g.coordY(this.y)
+		cr.move_to(g.coordX(this.min || g.minX), y)
+		cr.line_to(g.coordX(this.max || g.maxX), y)
+		cr.set_source_color(attrInfo.lineColor || attrInfo.color)
+		g.applyLineWidth(cr, attrInfo.lineWidth)
+		g.applyLineStyle(cr, attrInfo.lineStyle)
+		cr.stroke()
+	}
+	getRangeX() = Range(this.min, this.max)
+	getRangeY() = Range(y, y)
+	matchedSymbol(symbol:symbol) = false
+}
+
+//-----------------------------------------------------------------------------
+// VLineInfo
+//-----------------------------------------------------------------------------
+VLineInfo = struct(x:number, min:number:nil, max:number:nil, attrInfo:AttrInfo):map {
+	draw(g:Graph, cr:cairo.context) = cr.save {
+		cr.set_antialias(cairo.ANTIALIAS_DEFAULT)
+		attrInfo = this.attrInfo
+		(attrInfo.lineStyle == `none) && continue
+		x = g.coordX(this.x)
+		cr.move_to(x, g.coordY(this.min || g.minY))
+		cr.line_to(x, g.coordY(this.max || g.maxY))
+		cr.set_source_color(attrInfo.lineColor || attrInfo.color)
+		g.applyLineWidth(cr, attrInfo.lineWidth)
+		g.applyLineStyle(cr, attrInfo.lineStyle)
+		cr.stroke()
+	}
+	getRangeX() = Range(x, x)
+	getRangeY() = Range(this.min, this.max)
+	matchedSymbol(symbol:symbol) = false
+}
+
+//-----------------------------------------------------------------------------
+// functions
+//-----------------------------------------------------------------------------
+canvas(orient?:symbol, nFolds?:number) {block} = {
+	Canvas(orient, nFolds) {|cv| block(cv)}
+} %% {`en, R'''
+Creates a `plotter.Canvas` instance.
+
+The argument `orient` takes a symbol that indicates in which direction the inner graphs shall be aligned:
+`` `vert`` in vertical direction and `` `horz`` in horizontal.
+
+The argument `nFolds` specifies the number of graphs placed in an alignment direction.
+'''}
+
+graph() {block} = {
+	Canvas().graph() {|g| block(g)}
+} %% {`en, R'''
+Creates a `plotter.Graph` instance after creating a `plotter.Canvas` instance that contains it.
+'''}
+
+//-----------------------------------------------------------------------------
+// test script
+//-----------------------------------------------------------------------------
+main() = {
+	Canvas {|cv|
+		cv.graph {|g|
+			g.title = 'Title'
+			g.titleX = 'X-axis'
+			g.titleY = 'Y-axis'
+			g.minX = -10, g.maxX = 10
+			g.minY = -1.5, g.maxY = 1.5
+			g.func(f(x) = math.sin(x))
+		}
+		cv.show()
+	}
+}
+
+if (__name__ == '__main__') {
+	import(wx.show)
+	main()
+}
