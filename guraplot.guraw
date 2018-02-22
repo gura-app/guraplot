@@ -18,6 +18,7 @@ PanelGraph = class(wx.Panel) {
 		this.brushBg = wx.Brush(wx.Colour(128, 128, 128), wx.BRUSHSTYLE_SOLID)
 		this.cv = plotter.Canvas()
 		this.g = this.AddGraph()
+		this.g.focusFlag = true
 		this.PrepareImgCanvas(600, 600)
 		this.RenderCanvas(false)
 		this.Bind(wx.EVT_PAINT) {|event| this.OnPaint(event)}
