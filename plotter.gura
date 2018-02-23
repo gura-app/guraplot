@@ -80,6 +80,9 @@ Canvas = class {
 	where `g` is the created instance.\n
 	In this case, the block's result would become the function's returned value.
 	'''}
+	deleteGraph(graph):void = {
+		(idx = this.graphs.find(graph):index) && this.graphs.erase(idx)
+	}
 	blank(nSpans:number => 1) = {
 		g = GraphBlank(this, nSpans)
 		this.graphs.add(g)

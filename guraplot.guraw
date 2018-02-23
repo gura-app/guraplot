@@ -7,7 +7,7 @@ import(resource)
 // Control ID
 //-----------------------------------------------------------------------------
 [
-	ID_Prompt, ID_AddGraph,
+	ID_Prompt, ID_AddGraph, ID_DeleteGraph,
 ] = wx.ID_HIGHEST..
 
 //-----------------------------------------------------------------------------
@@ -16,14 +16,15 @@ import(resource)
 PanelGraph = class(wx.Panel) {
 	__init__(parent:wx.Window, style:number => 0) = {|parent, style => (style | wx.HSCROLL | wx.VSCROLL)|
 		this.brushBg = wx.Brush(wx.Colour(128, 128, 128), wx.BRUSHSTYLE_SOLID)
-		this.cv = plotter.Canvas()
-		this.g = this.AddGraph()
-		this.g.focusFlag = true
+		this.canvas = plotter.Canvas()
+		this.graphCur = this.AddGraph()
+		this.graphCur.focusFlag = true
 		this.PrepareImgCanvas(600, 600)
 		this.RenderCanvas(false)
 		this.Bind(wx.EVT_PAINT) {|event| this.OnPaint(event)}
 		this.Bind(wx.EVT_SIZE) {|event| this.OnSize(event)}
 		this.Bind(wx.EVT_MOTION) {|event| this.OnMotion(event)}
+		this.Bind(wx.EVT_LEFT_DOWN) {|event| this.OnLeftDown(event)}
 		this.Bind(wx.EVT_SCROLLWIN) {|event| this.OnScrollWin(event)}
 		this.Bind(wx.EVT_MOUSEWHEEL) {|event| this.OnMouseWheel(event)}
 	}
@@ -31,18 +32,26 @@ PanelGraph = class(wx.Panel) {
 		this.imgCanvas = image(`rgba, width, height, `white)
 	}
 	AddFuncToCurGraph(f:function) = {
-		this.g.func(f)
+		this.graphCur.func(f)
 	}
 	AddGraph() = {
-		this.cv.graph()
+		this.canvas.graph()
+	}
+	DeleteGraphCur() = {
+		this.canvas.deleteGraph(this.graphCur)
+		graphs = this.canvas.graphs
+		if (!graphs.isempty() && !graphs:*focusFlag.or()) {
+			this.graphCur = graphs[0]
+			this.graphCur.focusFlag = true
+		}
 	}
 	HitCheck(x:number, y:number) = {
-		graphs = this.cv.graphs
+		graphs = this.canvas.graphs
 		graphs.filter(graphs:*rcAxis.skipnil():*contains(x, y)).next()
 	}
 	RenderCanvas(refreshFlag:boolean => true) = {
 		this.imgCanvas.fill(`white)
-		this.cv.render(this.imgCanvas)
+		this.canvas.render(this.imgCanvas)
 		refreshFlag && this.Refresh()
 	}
 	OnSize(event:wx.SizeEvent) = {
@@ -70,11 +79,14 @@ PanelGraph = class(wx.Panel) {
 		dc = nil
 	}
 	OnMotion(event:wx.MouseEvent) = {
+	}
+	OnLeftDown(event:wx.MouseEvent) = {
 		pt = event.GetPosition()
-		g = this.HitCheck(pt.x, pt.y)
-		if (g && !g.focusFlag) {
-			println('check')
-			g.focusFlag = true
+		graph = this.HitCheck(pt.x, pt.y)
+		if (graph) {
+			this.canvas.graphs::focusFlag = false
+			this.graphCur = graph
+			graph.focusFlag = true
 			this.RenderCanvas()
 		}
 	}
@@ -145,6 +157,9 @@ PanelMain = class(wx.Panel) {
 			wx.Button(this, ID_AddGraph, 'Add Graph') {|ctrl|
 				hbox.Add(ctrl, wx.SizerFlags().Expand())
 			}
+			wx.Button(this, ID_DeleteGraph, 'Delete Graph') {|ctrl|
+				hbox.Add(ctrl, wx.SizerFlags().Expand())
+			}
 		}
 		PanelGraph(this) {|panelGraph|
 			vbox.Add(panelGraph, wx.SizerFlags(1).Expand())
@@ -153,6 +168,7 @@ PanelMain = class(wx.Panel) {
 		this.SetSizer(outerBox)
 		this.Bind(wx.EVT_TEXT_ENTER, ID_Prompt) {|event| this.OnTextEnter_Prompt(event)}
 		this.Bind(wx.EVT_BUTTON, ID_AddGraph) {|event| this.OnButton_AddGraph(event)}
+		this.Bind(wx.EVT_BUTTON, ID_DeleteGraph) {|event| this.OnButton_DeleteGraph(event)}
 	}
 	OnTextEnter_Prompt(event:wx.CommandEvent) = {
 		text = this.textCtrlPrompt.GetValue()
@@ -172,6 +188,10 @@ PanelMain = class(wx.Panel) {
 	}
 	OnButton_AddGraph(event:wx.CommandEvent) = {
 		this.panelGraph.AddGraph()
+		this.panelGraph.RenderCanvas()
+	}
+	OnButton_DeleteGraph(event:wx.CommandEvent) = {
+		this.panelGraph.DeleteGraphCur()
 		this.panelGraph.RenderCanvas()
 	}
 }
